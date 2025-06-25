@@ -1,0 +1,143 @@
+# Rev 2.0
+# I2C
+#   SDA: GPIO32
+#   SCL: GPIO33
+# Onewire: GPIO4
+# MCP23008
+#   INT PIN: IO35
+#   Addr: 0x20
+# HP PSU Addrs
+#   0x58, 0x59, 0x5A, 0x5B 1-4
+#   0x5C, 0x5D, 0x5E, 0x5F 5-8 # Unused in this board revision
+# ESP32 WT32-ETH01 v1.4
+# https://github.com/egnor/wt32-eth01
+
+# R2.0
+# Switch 0-3 - pins 6,7,0,1
+
+# R2.0
+# Buttons 0-3 - pins 5,4,3,2
+
+
+esphome:
+  name: "${devicename}"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# todo move psu control to github
+external_components:
+  #- source:
+  #    type: local
+  #    path: "local_components"
+  - source:
+      type: git
+      url: https://github.com/mikeneiderhauser/esphome_components
+      ref: release
+    components: [ hp_psu ]
+
+# Enable logging
+logger:
+  level: DEBUG
+
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: "${api_encryption_key}"
+
+ota:
+  - platform: esphome
+    password: "${ota_password}"
+
+# TODO look into entity sorting
+# https://esphome.io/components/web_server#config-webserver-version-3-options
+web_server:
+  version: 3
+
+
+packages:
+  # ethernet package - pick this or wifi
+  ethernet_setup: !include { file: pkgs/ethernet.yaml }
+
+  ## wifi package - pick this or ethernet
+  #wifi_setup: !include { file: pkgs/wifi.yaml }
+
+  uptime_sensor: !include { file: pkgs/uptime.yaml }
+
+
+# required_vars:
+# upper_devicename
+# psu_num
+# psu_addr
+# io_exp_input_pin: 5 - button pin
+# io_exp_output_pin: 6 - switch/transistor pin
+# diable_by_default
+
+  psu_1: !include { file: pkgs/hp_psu.yaml, vars: {
+    upper_devicename: "${upper_devicename}",
+    psu_num: 1,
+    psu_addr: 0x58,
+    io_exp_input_pin: 5,
+    io_exp_output_pin: 6,
+    disable_by_default: "${disable_by_default_psu1}"
+  }}
+
+  psu_2: !include { file: pkgs/hp_psu.yaml, vars: {
+    upper_devicename: "${upper_devicename}",
+    psu_num: 2,
+    psu_addr: 0x5C,
+    io_exp_input_pin: 4,
+    io_exp_output_pin: 7,
+    disable_by_default: "${disable_by_default_psu2}"
+  }}
+
+  psu_3: !include { file: pkgs/hp_psu.yaml, vars: {
+    upper_devicename: "${upper_devicename}",
+    psu_num: 3,
+    psu_addr: 0x5A,
+    io_exp_input_pin: 3,
+    io_exp_output_pin: 0,
+    disable_by_default: "${disable_by_default_psu3}"
+  }}
+
+  psu_4: !include { file: pkgs/hp_psu.yaml, vars: {
+    upper_devicename: "${upper_devicename}",
+    psu_num: 4,
+    psu_addr: 0x5E,
+    io_exp_input_pin: 2,
+    io_exp_output_pin: 1,
+    disable_by_default: "${disable_by_default_psu4}"
+  }}
+
+
+one_wire:
+  - platform: gpio
+    pin: GPIO4
+
+i2c:
+  sda: GPIO32
+  scl: GPIO33
+  scan: True
+  frequency: 400kHz
+
+#https://esphome.io/components/mcp230xx.html
+mcp23008:
+  - id: 'mcp23008_hub'
+    address: 0x20
+
+# TODO interrupts
+binary_sensor:
+  - platform: gpio
+    name: "${upper_devicename} - MCP23008 Interrupt"
+    pin: GPIO35
+
+# Sensors
+sensor:
+# Sensor Dallas 1-Wire - DS18B20
+  - platform: dallas_temp
+    name: "${upper_devicename} - Ext Temp C"
+    id: dallas_temp_c
+    update_interval: 10s

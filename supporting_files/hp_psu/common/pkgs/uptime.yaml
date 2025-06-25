@@ -1,0 +1,5 @@
+sensor:
+# Sensor Uptime
+  - platform: uptime
+    type: seconds
+    name: "${upper_devicename} - Uptime"

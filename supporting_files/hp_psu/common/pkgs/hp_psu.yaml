@@ -1,0 +1,59 @@
+switch:
+  - platform: gpio
+    name: "${upper_devicename} - PSU ${psu_num} Switch"
+    id: psu${psu_num}_en
+    pin:
+      mcp23xxx: mcp23008_hub
+      number: ${io_exp_output_pin}
+      mode:
+        output: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    disabled_by_default: "${disable_by_default}"
+
+binary_sensor:
+  - platform: gpio
+    name: "${upper_devicename} - PSU ${psu_num} Toggle"
+    id: psu${psu_num}_btn
+    pin:
+      mcp23xxx: mcp23008_hub
+      number: ${io_exp_input_pin}
+      mode: INPUT_PULLUP
+      interrupt: FALLING # CHANGE, RISING, FALLING
+    disabled_by_default: "${disable_by_default}"
+    filters:
+      - delayed_on: 10ms  # Debounce for 10ms to avoid multiple triggers
+      - delayed_off: 10ms
+    on_press:
+      then:
+        - switch.toggle: psu${psu_num}_en
+
+sensor:
+# Sensor - HP PSU ${psu_num}
+  - platform: hp_psu
+    id: hp_psu_${psu_num}
+    name: hp_psu_${psu_num}
+    disabled_by_default: ${disable_by_default}
+    address: ${psu_addr}
+    update_interval: 1s  # Setting to 1s as the update happens in a few rounds
+    intake_temperature:
+      name: ${upper_devicename} - PSU ${psu_num} Intake Temperature
+    internal_temperature:
+      name: ${upper_devicename} - PSU ${psu_num} Internal Temperature
+    average_temperature:
+      name: ${upper_devicename} - PSU ${psu_num} Average Temperature
+    ac_voltage:
+      name: ${upper_devicename} - PSU ${psu_num} AC Voltage
+    ac_current:
+      name: ${upper_devicename} - PSU ${psu_num} AC Current
+    ac_power:
+      name: ${upper_devicename} - PSU ${psu_num} AC Power
+    dc_voltage:
+      name: ${upper_devicename} - PSU ${psu_num} DC Voltage
+    dc_current:
+      name: ${upper_devicename} - PSU ${psu_num} DC Current
+    dc_power:
+      name: ${upper_devicename} - PSU ${psu_num} DC Power
+    fan_target_rpm:
+      name: ${upper_devicename} - PSU ${psu_num} Fan Target RPM
+    fan_actual_rpm:
+      name: ${upper_devicename} - PSU ${psu_num} Fan Actual RPM

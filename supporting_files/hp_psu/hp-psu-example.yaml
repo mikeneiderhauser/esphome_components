@@ -1,0 +1,16 @@
+substitutions:
+  devicename: hp-psu-example
+  upper_devicename: hp-psu-example
+  api_encryption_key: < REPLACE - USE GENERATED >
+  ota_password: < REPLACE - USE GENERATED >
+  ap_password: < REPLACE - USE GENERATED >
+  ip: 10.0.0.109
+  subnet: 255.255.255.0
+  gateway: 10.0.0.1
+
+  disable_by_default_psu1: "false" # set to false to enable, true to disable
+  disable_by_default_psu2: "false"  # set to true to disable
+  disable_by_default_psu3: "true"  # set to true to disable
+  disable_by_default_psu4: "true"  # set to true to disable
+
+<<: !include ./common/HPPSU_CTRL_r2.0.yaml

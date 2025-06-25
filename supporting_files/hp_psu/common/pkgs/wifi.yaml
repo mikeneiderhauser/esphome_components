@@ -1,0 +1,24 @@
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  manual_ip:
+    static_ip: "${ip}"
+    gateway: "${gateway}"
+    subnet: "${subnet}"
+
+  ap:
+    ssid: "${upper_devicename}"
+    password: "${ap_password}"
+
+# Enable fallback hotspot (captive portal) in case wifi connection fails. Does not work with ethernet
+captive_portal:
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "${upper_devicename} - IP Address"
+    ssid:
+      name: "${upper_devicename} - SSID"
+    mac_address:
+      name: "${upper_devicename} - MAC Address"
