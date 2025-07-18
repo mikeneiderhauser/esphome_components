@@ -1,7 +1,7 @@
 import esphome.codegen as cg
 from esphome.components import sensor,i2c
 import esphome.config_validation as cv
-import esphome.cpp_helpers
+#import esphome.cpp_helpers
 
 from esphome.const import (
     CONF_NAME,
@@ -127,7 +127,7 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     await i2c.register_i2c_device(var, config)
-    await esphome.cpp_helpers.setup_entity(var, config)
+    #await esphome.cpp_helpers.setup_entity(var, config)
 
     # Temperature
     if intake_temp_config := config.get(CONF_INTAKE_TEMP):
