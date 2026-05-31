@@ -143,45 +143,60 @@ bool HPPSUI2CComponent::getRPMStats() {
     return true;
 }
 
-// Slow-changing peaks, min, and status flags. Scales match the live
-// power readings (raw watts, amps/64) for consistency.
+// Slow-changing peaks, min, and status flags — all OPTIONAL/diagnostic.
+// Best-effort: each read is independent, only checksum-valid and non-sentinel
+// (0xFFFF = unsupported on some variants) values are published, and the group
+// never reports failure so it can't trip the device-health/warning logic.
+// Scales match the live power readings (raw watts, amps/64) for consistency.
 bool HPPSUI2CComponent::getPeakFlagStats() {
     uint16_t raw = 0;
 
-    if (!this->readReg(REG_FLAGS, raw)) return false;
-    this->stats_.flags = raw;
-
-    if (this->readReg(REG_PEAK_WATTS_IN, raw))
+    // Each register is only read if a sensor is configured for it, so dropping
+    // an unsupported reading from the YAML also drops its I2C transaction.
+    if (this->peak_watt_in_ != nullptr && this->readReg(REG_PEAK_WATTS_IN, raw) && raw != 0xFFFF) {
         this->stats_.peak_watt_in = static_cast<float>(raw);
-
-    if (this->readReg(REG_MIN_AMPS_IN, raw))
+        this->peak_watt_in_->publish_state(this->stats_.peak_watt_in);
+    }
+    if (this->min_amp_in_ != nullptr && this->readReg(REG_MIN_AMPS_IN, raw) && raw != 0xFFFF) {
         this->stats_.min_amp_in = static_cast<float>(raw) / 64.0f;
-
-    if (this->readReg(REG_PEAK_AMPS_OUT, raw))
+        this->min_amp_in_->publish_state(this->stats_.min_amp_in);
+    }
+    if (this->peak_amp_out_ != nullptr && this->readReg(REG_PEAK_AMPS_OUT, raw) && raw != 0xFFFF) {
         this->stats_.peak_amp_out = static_cast<float>(raw) / 64.0f;
-
-    return true;
+        this->peak_amp_out_->publish_state(this->stats_.peak_amp_out);
+    }
+    if (this->flags_ != nullptr && this->readReg(REG_FLAGS, raw)) {
+        this->stats_.flags = raw;
+        this->flags_->publish_state(this->stats_.flags);
+    }
+    return true;  // optional registers never fail the cycle
 }
 
-// 32-bit cumulative energy + PSU runtime.
+// 32-bit cumulative energy + PSU runtime — also optional/best-effort.
 bool HPPSUI2CComponent::getEnergyStats() {
     uint16_t lo = 0, hi = 0;
 
     // WATT_SECONDS_IN spans two consecutive registers (low, then high word).
-    if (!this->readReg(REG_WATT_SEC_IN_LO, lo)) return false;
-    if (this->readReg(REG_WATT_SEC_IN_HI, hi)) {
+    // Only read if an energy sensor is configured.
+    if (this->energy_in_ != nullptr &&
+        this->readReg(REG_WATT_SEC_IN_LO, lo) && this->readReg(REG_WATT_SEC_IN_HI, hi)) {
         uint32_t watt_sec_raw = (static_cast<uint32_t>(hi) << 16) | lo;
-        // raw/4 = watt-seconds; /3600 -> watt-hours  =>  raw / 14400
-        this->stats_.energy_wh = static_cast<float>(watt_sec_raw) / 14400.0f;
-        if (this->debug_raw_)
-            ESP_LOGI(TAG, "0x%02X RAW watt_sec=%u", this->address_, watt_sec_raw);
+        if (watt_sec_raw != 0xFFFFFFFF) {
+            // raw/4 = watt-seconds; /3600 -> watt-hours  =>  raw / 14400
+            this->stats_.energy_wh = static_cast<float>(watt_sec_raw) / 14400.0f;
+            this->energy_in_->publish_state(this->stats_.energy_wh);
+            if (this->debug_raw_)
+                ESP_LOGI(TAG, "0x%02X RAW watt_sec=%u", this->address_, watt_sec_raw);
+        }
     }
 
     uint16_t raw = 0;
-    if (this->readReg(REG_ON_SECONDS, raw))
+    if (this->runtime_ != nullptr && this->readReg(REG_ON_SECONDS, raw) && raw != 0xFFFF) {
         this->stats_.runtime_s = static_cast<float>(raw) / 2.0f;
+        this->runtime_->publish_state(this->stats_.runtime_s);
+    }
 
-    return true;
+    return true;  // optional registers never fail the cycle
 }
 
 // ---------------------------------------------------------------------------
@@ -333,24 +348,16 @@ void HPPSUI2CComponent::update() {
             break;
 
         case 3:
+            // Optional diagnostics — publishes internally, never fails the cycle.
             this->stats_idx_ = 4;
             ok = this->getPeakFlagStats();
-            if (ok) {
-                if (this->flags_ != nullptr)         this->flags_->publish_state(this->stats_.flags);
-                if (this->peak_watt_in_ != nullptr)  this->peak_watt_in_->publish_state(this->stats_.peak_watt_in);
-                if (this->min_amp_in_ != nullptr)    this->min_amp_in_->publish_state(this->stats_.min_amp_in);
-                if (this->peak_amp_out_ != nullptr)  this->peak_amp_out_->publish_state(this->stats_.peak_amp_out);
-            }
             break;
 
         case 4:
         default:
+            // Optional diagnostics — publishes internally, never fails the cycle.
             this->stats_idx_ = 0;
             ok = this->getEnergyStats();
-            if (ok) {
-                if (this->energy_in_ != nullptr) this->energy_in_->publish_state(this->stats_.energy_wh);
-                if (this->runtime_ != nullptr)   this->runtime_->publish_state(this->stats_.runtime_s);
-            }
             break;
     }
 

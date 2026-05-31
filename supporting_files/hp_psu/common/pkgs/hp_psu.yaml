@@ -61,9 +61,5 @@ sensor:
       name: ${upper_devicename} - PSU ${psu_num} Min Current In
     peak_current_out:
       name: ${upper_devicename} - PSU ${psu_num} Peak Current Out
-    runtime:
-      name: ${upper_devicename} - PSU ${psu_num} Runtime
     energy_in:
       name: ${upper_devicename} - PSU ${psu_num} Energy In
-    status_flags:
-      name: ${upper_devicename} - PSU ${psu_num} Status Flags
