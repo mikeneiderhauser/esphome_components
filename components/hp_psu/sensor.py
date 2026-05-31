@@ -22,7 +22,15 @@ from esphome.const import (
     DEVICE_CLASS_CURRENT,
     UNIT_AMPERE,
 
-    STATE_CLASS_MEASUREMENT
+    DEVICE_CLASS_ENERGY,
+    UNIT_WATT_HOURS,
+
+    DEVICE_CLASS_DURATION,
+    UNIT_SECOND,
+
+    ENTITY_CATEGORY_DIAGNOSTIC,
+    STATE_CLASS_MEASUREMENT,
+    STATE_CLASS_TOTAL_INCREASING,
 )
 
 from . import hp_psu_ns
@@ -46,7 +54,15 @@ CONF_OUTPUT_POWER   = "dc_power"
 CONF_FAN_TARGET_RPM = "fan_target_rpm"
 CONF_FAN_ACTUAL_RPM = "fan_actual_rpm"
 
-CONF_ENABLED = "enabled"
+CONF_PEAK_POWER_IN    = "peak_power_in"
+CONF_MIN_CURRENT_IN   = "min_current_in"
+CONF_PEAK_CURRENT_OUT = "peak_current_out"
+CONF_RUNTIME          = "runtime"
+CONF_ENERGY_IN        = "energy_in"
+CONF_STATUS_FLAGS     = "status_flags"
+
+CONF_ENABLED   = "enabled"
+CONF_DEBUG_RAW = "debug_raw"
 
 # Fan / temp control
 CONF_TEMP_MIN    = "temp_min"
@@ -133,9 +149,49 @@ CONFIG_SCHEMA = (
                 state_class=STATE_CLASS_MEASUREMENT,
             ),
 
+            # Aggregate / counter registers
+            cv.Optional(CONF_PEAK_POWER_IN): sensor.sensor_schema(
+                unit_of_measurement=UNIT_WATT,
+                accuracy_decimals=2,
+                device_class=DEVICE_CLASS_POWER,
+                state_class=STATE_CLASS_MEASUREMENT,
+            ),
+            cv.Optional(CONF_MIN_CURRENT_IN): sensor.sensor_schema(
+                unit_of_measurement=UNIT_AMPERE,
+                accuracy_decimals=2,
+                device_class=DEVICE_CLASS_CURRENT,
+                state_class=STATE_CLASS_MEASUREMENT,
+            ),
+            cv.Optional(CONF_PEAK_CURRENT_OUT): sensor.sensor_schema(
+                unit_of_measurement=UNIT_AMPERE,
+                accuracy_decimals=2,
+                device_class=DEVICE_CLASS_CURRENT,
+                state_class=STATE_CLASS_MEASUREMENT,
+            ),
+            cv.Optional(CONF_RUNTIME): sensor.sensor_schema(
+                unit_of_measurement=UNIT_SECOND,
+                accuracy_decimals=0,
+                device_class=DEVICE_CLASS_DURATION,
+                state_class=STATE_CLASS_TOTAL_INCREASING,
+            ),
+            cv.Optional(CONF_ENERGY_IN): sensor.sensor_schema(
+                unit_of_measurement=UNIT_WATT_HOURS,
+                accuracy_decimals=1,
+                device_class=DEVICE_CLASS_ENERGY,
+                state_class=STATE_CLASS_TOTAL_INCREASING,
+            ),
+            cv.Optional(CONF_STATUS_FLAGS): sensor.sensor_schema(
+                accuracy_decimals=0,
+                entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            ),
+
             # When false, the PSU slot is treated as unpopulated: no I2C
             # probing, no polling, and its entities are hidden in HA.
             cv.Optional(CONF_ENABLED, default=True): cv.boolean,
+
+            # When true, logs raw (undivided) register values for load-test
+            # calibration. Leave off in normal operation.
+            cv.Optional(CONF_DEBUG_RAW, default=False): cv.boolean,
 
             # Fan / temp control (optional, defaults handled in C++)
             cv.Optional(CONF_TEMP_MIN,    default=40):    cv.int_range(min=-50, max=200),
@@ -196,9 +252,24 @@ async def to_code(config):
     if c := config.get(CONF_FAN_ACTUAL_RPM):
         await add_sensor(c, var.set_rpm_read)
 
+    # Aggregate / counter sensors
+    if c := config.get(CONF_PEAK_POWER_IN):
+        await add_sensor(c, var.set_peak_watt_in)
+    if c := config.get(CONF_MIN_CURRENT_IN):
+        await add_sensor(c, var.set_min_amp_in)
+    if c := config.get(CONF_PEAK_CURRENT_OUT):
+        await add_sensor(c, var.set_peak_amp_out)
+    if c := config.get(CONF_RUNTIME):
+        await add_sensor(c, var.set_runtime)
+    if c := config.get(CONF_ENERGY_IN):
+        await add_sensor(c, var.set_energy_in)
+    if c := config.get(CONF_STATUS_FLAGS):
+        await add_sensor(c, var.set_flags)
+
     # A disabled slot is treated as physically unpopulated: skip all I2C
     # polling in C++ (entity hiding handled per-sensor above).
     cg.add(var.set_psu_disabled(not enabled))
+    cg.add(var.set_debug_raw(config[CONF_DEBUG_RAW]))
 
     # Fan / temp control config
     cg.add(var.set_temp_min(config[CONF_TEMP_MIN]))

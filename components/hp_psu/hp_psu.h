@@ -18,6 +18,13 @@ namespace hp_psu {
 #define REG_VOLT_OUT          (0x07<<1)  // Scale 256
 #define REG_AMP_OUT           (0x08<<1)  // Scale 64
 #define REG_WATT_OUT          (0x09<<1)  // Scale 1
+#define REG_FLAGS             (0x01<<1)  // status bits (incl. power-good)
+#define REG_WATT_SEC_IN_LO    (0x16<<1)  // 32-bit energy counter, low word
+#define REG_WATT_SEC_IN_HI    (0x17<<1)  // 32-bit energy counter, high word
+#define REG_ON_SECONDS        (0x18<<1)  // PSU runtime, raw/2 -> seconds
+#define REG_PEAK_WATTS_IN     (0x19<<1)  // peak input watts
+#define REG_MIN_AMPS_IN       (0x1a<<1)  // min input amps
+#define REG_PEAK_AMPS_OUT     (0x1b<<1)  // peak output amps
 
 // Temperature outlier rejection bounds (°C)
 #define TMP_OUTLIER_MIN -50.0f
@@ -30,9 +37,10 @@ namespace hp_psu {
 #define DEFAULT_RPM_MAX     14000
 #define DEFAULT_TEMP_ADJUST 18   // raw register offset applied before F→C conversion
 
-// Number of update cycles before cycling back to 0
-// (0: power-in, 1: power-out, 2: temperature + RPM + fan control)
-#define STATS_CYCLE_COUNT 3
+// Number of update cycles before cycling back to 0:
+//   0: power-in        1: power-out      2: temperature + RPM + fan control
+//   3: peaks/flags     4: energy + runtime
+#define STATS_CYCLE_COUNT 5
 
 struct PSUStats {
     uint16_t rpm_read{0};
@@ -49,6 +57,13 @@ struct PSUStats {
     float volt_out{0.0f};
     float amp_out{0.0f};
     float watt_out{0.0f};
+
+    float peak_watt_in{0.0f};
+    float min_amp_in{0.0f};
+    float peak_amp_out{0.0f};
+    float runtime_s{0.0f};
+    float energy_wh{0.0f};
+    uint16_t flags{0};
 };
 
 
@@ -66,10 +81,19 @@ class HPPSUI2CComponent : public esphome::EntityBase, public esphome::PollingCom
     void set_volt_out(sensor::Sensor *s)       { volt_out_ = s; }
     void set_amp_out(sensor::Sensor *s)        { amp_out_ = s; }
     void set_watt_out(sensor::Sensor *s)       { watt_out_ = s; }
+    void set_peak_watt_in(sensor::Sensor *s)   { peak_watt_in_ = s; }
+    void set_min_amp_in(sensor::Sensor *s)     { min_amp_in_ = s; }
+    void set_peak_amp_out(sensor::Sensor *s)   { peak_amp_out_ = s; }
+    void set_runtime(sensor::Sensor *s)        { runtime_ = s; }
+    void set_energy_in(sensor::Sensor *s)      { energy_in_ = s; }
+    void set_flags(sensor::Sensor *s)          { flags_ = s; }
 
     // Marks this PSU slot as unused — fully skips setup/polling when true.
     // Wired from the inverse of the YAML `enabled` option in to_code().
     void set_psu_disabled(bool disabled) { psu_disabled_ = disabled; }
+
+    // When true, logs raw (undivided) register values for load-test calibration.
+    void set_debug_raw(bool d) { debug_raw_ = d; }
 
     // Fan / temp control setters
     void set_temp_min(int v)     { temp_min_ = v; }
@@ -94,6 +118,7 @@ class HPPSUI2CComponent : public esphome::EntityBase, public esphome::PollingCom
     int      temp_adjust_{DEFAULT_TEMP_ADJUST};
 
     bool    psu_disabled_{false};
+    bool    debug_raw_{false};
     bool    device_present_{false};
     uint8_t i2c_error_count_{0};
     static const uint8_t I2C_MAX_ERRORS{3};
@@ -116,6 +141,8 @@ class HPPSUI2CComponent : public esphome::EntityBase, public esphome::PollingCom
     bool getPowerOutStats();
     bool getTemperatureStats();
     bool getRPMStats();
+    bool getPeakFlagStats();
+    bool getEnergyStats();
 
     void setRPM(uint16_t rpm_value);
     void publishNAN();
@@ -132,6 +159,12 @@ class HPPSUI2CComponent : public esphome::EntityBase, public esphome::PollingCom
     sensor::Sensor *volt_out_{nullptr};
     sensor::Sensor *amp_out_{nullptr};
     sensor::Sensor *watt_out_{nullptr};
+    sensor::Sensor *peak_watt_in_{nullptr};
+    sensor::Sensor *min_amp_in_{nullptr};
+    sensor::Sensor *peak_amp_out_{nullptr};
+    sensor::Sensor *runtime_{nullptr};
+    sensor::Sensor *energy_in_{nullptr};
+    sensor::Sensor *flags_{nullptr};
 };
 
 }  // namespace hp_psu

@@ -79,12 +79,17 @@ bool HPPSUI2CComponent::getPowerInStats() {
 
     if (!this->readReg(REG_VOLT_IN, raw)) return false;
     this->stats_.volt_in = static_cast<float>(raw) / 32.0f;
+    if (this->debug_raw_) ESP_LOGI(TAG, "0x%02X RAW volt_in=%u", this->address_, raw);
 
-    if (this->readReg(REG_AMP_IN, raw))
+    if (this->readReg(REG_AMP_IN, raw)) {
         this->stats_.amp_in = static_cast<float>(raw) / 64.0f;
+        if (this->debug_raw_) ESP_LOGI(TAG, "0x%02X RAW amp_in=%u", this->address_, raw);
+    }
 
-    if (this->readReg(REG_WATT_IN, raw))
+    if (this->readReg(REG_WATT_IN, raw)) {
         this->stats_.watt_in = static_cast<float>(raw);
+        if (this->debug_raw_) ESP_LOGI(TAG, "0x%02X RAW watt_in=%u", this->address_, raw);
+    }
 
     return true;
 }
@@ -94,12 +99,17 @@ bool HPPSUI2CComponent::getPowerOutStats() {
 
     if (!this->readReg(REG_VOLT_OUT, raw)) return false;
     this->stats_.volt_out = static_cast<float>(raw) / 256.0f;
+    if (this->debug_raw_) ESP_LOGI(TAG, "0x%02X RAW volt_out=%u", this->address_, raw);
 
-    if (this->readReg(REG_AMP_OUT, raw))
+    if (this->readReg(REG_AMP_OUT, raw)) {
         this->stats_.amp_out = static_cast<float>(raw) / 64.0f;
+        if (this->debug_raw_) ESP_LOGI(TAG, "0x%02X RAW amp_out=%u", this->address_, raw);
+    }
 
-    if (this->readReg(REG_WATT_OUT, raw))
+    if (this->readReg(REG_WATT_OUT, raw)) {
         this->stats_.watt_out = static_cast<float>(raw);
+        if (this->debug_raw_) ESP_LOGI(TAG, "0x%02X RAW watt_out=%u", this->address_, raw);
+    }
 
     return true;
 }
@@ -133,6 +143,47 @@ bool HPPSUI2CComponent::getRPMStats() {
     return true;
 }
 
+// Slow-changing peaks, min, and status flags. Scales match the live
+// power readings (raw watts, amps/64) for consistency.
+bool HPPSUI2CComponent::getPeakFlagStats() {
+    uint16_t raw = 0;
+
+    if (!this->readReg(REG_FLAGS, raw)) return false;
+    this->stats_.flags = raw;
+
+    if (this->readReg(REG_PEAK_WATTS_IN, raw))
+        this->stats_.peak_watt_in = static_cast<float>(raw);
+
+    if (this->readReg(REG_MIN_AMPS_IN, raw))
+        this->stats_.min_amp_in = static_cast<float>(raw) / 64.0f;
+
+    if (this->readReg(REG_PEAK_AMPS_OUT, raw))
+        this->stats_.peak_amp_out = static_cast<float>(raw) / 64.0f;
+
+    return true;
+}
+
+// 32-bit cumulative energy + PSU runtime.
+bool HPPSUI2CComponent::getEnergyStats() {
+    uint16_t lo = 0, hi = 0;
+
+    // WATT_SECONDS_IN spans two consecutive registers (low, then high word).
+    if (!this->readReg(REG_WATT_SEC_IN_LO, lo)) return false;
+    if (this->readReg(REG_WATT_SEC_IN_HI, hi)) {
+        uint32_t watt_sec_raw = (static_cast<uint32_t>(hi) << 16) | lo;
+        // raw/4 = watt-seconds; /3600 -> watt-hours  =>  raw / 14400
+        this->stats_.energy_wh = static_cast<float>(watt_sec_raw) / 14400.0f;
+        if (this->debug_raw_)
+            ESP_LOGI(TAG, "0x%02X RAW watt_sec=%u", this->address_, watt_sec_raw);
+    }
+
+    uint16_t raw = 0;
+    if (this->readReg(REG_ON_SECONDS, raw))
+        this->stats_.runtime_s = static_cast<float>(raw) / 2.0f;
+
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // Fan control
 // ---------------------------------------------------------------------------
@@ -158,6 +209,12 @@ void HPPSUI2CComponent::publishNAN() {
     if (this->tmp_avg_ != nullptr)        this->tmp_avg_->publish_state(NAN);
     if (this->rpm_read_ != nullptr)       this->rpm_read_->publish_state(NAN);
     if (this->rpm_target_ != nullptr)     this->rpm_target_->publish_state(NAN);
+    if (this->peak_watt_in_ != nullptr)   this->peak_watt_in_->publish_state(NAN);
+    if (this->min_amp_in_ != nullptr)     this->min_amp_in_->publish_state(NAN);
+    if (this->peak_amp_out_ != nullptr)   this->peak_amp_out_->publish_state(NAN);
+    if (this->runtime_ != nullptr)        this->runtime_->publish_state(NAN);
+    if (this->energy_in_ != nullptr)      this->energy_in_->publish_state(NAN);
+    if (this->flags_ != nullptr)          this->flags_->publish_state(NAN);
 }
 
 // disabled_by_default is set at compile time by ESPHome's Python codegen
@@ -239,11 +296,10 @@ void HPPSUI2CComponent::update() {
             break;
 
         case 2:
-        default:
             // Temperature + RPM + fan control merged: reading internal temp and
             // applying the fan target in the same pass keeps the control loop
-            // coherent (no cross-cycle lag) and shortens the rotation to 3 cycles.
-            this->stats_idx_ = 0;
+            // coherent (no cross-cycle lag).
+            this->stats_idx_ = 3;
             {
                 bool temp_ok = this->getTemperatureStats();
                 bool rpm_ok = this->getRPMStats();
@@ -273,6 +329,27 @@ void HPPSUI2CComponent::update() {
                     if (this->rpm_read_ != nullptr)       this->rpm_read_->publish_state(this->stats_.rpm_read);
                     if (this->rpm_target_ != nullptr)     this->rpm_target_->publish_state(this->stats_.rpm_tgt);
                 }
+            }
+            break;
+
+        case 3:
+            this->stats_idx_ = 4;
+            ok = this->getPeakFlagStats();
+            if (ok) {
+                if (this->flags_ != nullptr)         this->flags_->publish_state(this->stats_.flags);
+                if (this->peak_watt_in_ != nullptr)  this->peak_watt_in_->publish_state(this->stats_.peak_watt_in);
+                if (this->min_amp_in_ != nullptr)    this->min_amp_in_->publish_state(this->stats_.min_amp_in);
+                if (this->peak_amp_out_ != nullptr)  this->peak_amp_out_->publish_state(this->stats_.peak_amp_out);
+            }
+            break;
+
+        case 4:
+        default:
+            this->stats_idx_ = 0;
+            ok = this->getEnergyStats();
+            if (ok) {
+                if (this->energy_in_ != nullptr) this->energy_in_->publish_state(this->stats_.energy_wh);
+                if (this->runtime_ != nullptr)   this->runtime_->publish_state(this->stats_.runtime_s);
             }
             break;
     }

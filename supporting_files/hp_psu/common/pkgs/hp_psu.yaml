@@ -32,7 +32,7 @@ sensor:
     name: hp_psu_${psu_num}
     enabled: "${enable}"
     address: ${psu_addr}
-    update_interval: 1s  # Setting to 1s as the update happens in a few rounds
+    update_interval: 500ms  # 5-cycle rotation -> full snapshot every ~2.5s
     intake_temperature:
       name: ${upper_devicename} - PSU ${psu_num} Intake Temperature
     internal_temperature:
@@ -55,3 +55,15 @@ sensor:
       name: ${upper_devicename} - PSU ${psu_num} Fan Target RPM
     fan_actual_rpm:
       name: ${upper_devicename} - PSU ${psu_num} Fan Actual RPM
+    peak_power_in:
+      name: ${upper_devicename} - PSU ${psu_num} Peak Power In
+    min_current_in:
+      name: ${upper_devicename} - PSU ${psu_num} Min Current In
+    peak_current_out:
+      name: ${upper_devicename} - PSU ${psu_num} Peak Current Out
+    runtime:
+      name: ${upper_devicename} - PSU ${psu_num} Runtime
+    energy_in:
+      name: ${upper_devicename} - PSU ${psu_num} Energy In
+    status_flags:
+      name: ${upper_devicename} - PSU ${psu_num} Status Flags
