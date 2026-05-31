@@ -31,7 +31,8 @@ namespace hp_psu {
 #define DEFAULT_TEMP_ADJUST 18   // raw register offset applied before F→C conversion
 
 // Number of update cycles before cycling back to 0
-#define STATS_CYCLE_COUNT 4
+// (0: power-in, 1: power-out, 2: temperature + RPM + fan control)
+#define STATS_CYCLE_COUNT 3
 
 struct PSUStats {
     uint16_t rpm_read{0};

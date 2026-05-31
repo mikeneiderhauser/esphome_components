@@ -33,6 +33,16 @@ bool HPPSUI2CComponent::readReg(uint16_t reg, uint16_t &out) {
         return false;
     }
 
+    // Validate the PSU's reply checksum (data = [LSB, MSB, checksum]).
+    // A valid frame satisfies (LSB + MSB + CS) & 0xFF == 0. This rejects
+    // corrupt-but-ACKed reads (e.g. the 0xAA55 bus-glitch pattern) that a
+    // bus-level ErrorCode check alone would let through.
+    if (static_cast<uint8_t>(data[0] + data[1] + data[2]) != 0) {
+        ESP_LOGW(TAG, "HP PSU 0x%02X bad reply checksum on reg 0x%02X",
+                 this->address_, reg);
+        return false;
+    }
+
     out = (static_cast<uint16_t>(data[1]) << 8) | static_cast<uint16_t>(data[0]);
     return true;
 }
@@ -57,19 +67,18 @@ void HPPSUI2CComponent::writeReg(uint8_t reg, uint16_t val) {
 }
 
 // ---------------------------------------------------------------------------
-// Stat collection — each returns false only if the prime read fails.
-// Individual register reads within a method are best-effort; stale values
-// are retained on failure rather than forcing a full-cycle skip.
+// Stat collection — each returns false if the first (guard) read fails, which
+// indicates the device is unreachable. Subsequent reads are best-effort; stale
+// values are retained on failure rather than forcing a full-cycle skip.
+// Note: the DPS-1200 protocol needs no "prime"/dummy read — each register is a
+// single self-contained read.
 // ---------------------------------------------------------------------------
 
 bool HPPSUI2CComponent::getPowerInStats() {
     uint16_t raw = 0;
 
-    // Prime read — required by HP PSU I2C protocol before fresh data is available
-    if (!this->readReg(REG_TMP_INTAKE_READ, raw)) return false;
-
-    if (this->readReg(REG_VOLT_IN, raw))
-        this->stats_.volt_in = static_cast<float>(raw) / 32.0f;
+    if (!this->readReg(REG_VOLT_IN, raw)) return false;
+    this->stats_.volt_in = static_cast<float>(raw) / 32.0f;
 
     if (this->readReg(REG_AMP_IN, raw))
         this->stats_.amp_in = static_cast<float>(raw) / 64.0f;
@@ -83,11 +92,8 @@ bool HPPSUI2CComponent::getPowerInStats() {
 bool HPPSUI2CComponent::getPowerOutStats() {
     uint16_t raw = 0;
 
-    // Prime read
-    if (!this->readReg(REG_TMP_INTAKE_READ, raw)) return false;
-
-    if (this->readReg(REG_VOLT_OUT, raw))
-        this->stats_.volt_out = static_cast<float>(raw) / 256.0f;
+    if (!this->readReg(REG_VOLT_OUT, raw)) return false;
+    this->stats_.volt_out = static_cast<float>(raw) / 256.0f;
 
     if (this->readReg(REG_AMP_OUT, raw))
         this->stats_.amp_out = static_cast<float>(raw) / 64.0f;
@@ -101,11 +107,9 @@ bool HPPSUI2CComponent::getPowerOutStats() {
 bool HPPSUI2CComponent::getTemperatureStats() {
     uint16_t raw = 0;
 
-    // Prime read
+    // Intake temperature (guard read)
     if (!this->readReg(REG_TMP_INTAKE_READ, raw)) return false;
-
-    // Intake temperature
-    if (this->readReg(REG_TMP_INTAKE_READ, raw)) {
+    {
         float t = this->rawToC(static_cast<float>(raw) / 32.0f);
         if (t > TMP_OUTLIER_MIN && t < TMP_OUTLIER_MAX)
             this->stats_.intake_tmp_c = t;
@@ -235,38 +239,40 @@ void HPPSUI2CComponent::update() {
             break;
 
         case 2:
-            this->stats_idx_ = 3;
-            ok = this->getTemperatureStats();
-            if (ok) {
-                if (this->intake_tmp_c_ != nullptr)   this->intake_tmp_c_->publish_state(this->stats_.intake_tmp_c);
-                if (this->internal_tmp_c_ != nullptr) this->internal_tmp_c_->publish_state(this->stats_.internal_tmp_c);
-                if (this->tmp_avg_ != nullptr)        this->tmp_avg_->publish_state(this->stats_.tmp_avg);
-            }
-            break;
-
-        case 3:
         default:
+            // Temperature + RPM + fan control merged: reading internal temp and
+            // applying the fan target in the same pass keeps the control loop
+            // coherent (no cross-cycle lag) and shortens the rotation to 3 cycles.
             this->stats_idx_ = 0;
-            ok = this->getRPMStats();
+            {
+                bool temp_ok = this->getTemperatureStats();
+                bool rpm_ok = this->getRPMStats();
+                ok = temp_ok && rpm_ok;
 
-            // Fan control using float interpolation — internal temp from previous cycle
-            uint16_t target_rpm;
-            if (this->stats_.internal_tmp_c >= static_cast<float>(this->temp_max_)) {
-                target_rpm = this->rpm_max_;
-            } else if (this->stats_.internal_tmp_c <= static_cast<float>(this->temp_min_)) {
-                target_rpm = this->rpm_min_;
-            } else {
-                target_rpm = static_cast<uint16_t>(this->mapFloat(
-                    this->stats_.internal_tmp_c,
-                    static_cast<float>(this->temp_min_), static_cast<float>(this->temp_max_),
-                    static_cast<float>(this->rpm_min_),  static_cast<float>(this->rpm_max_)
-                ));
-            }
-            this->setRPM(target_rpm);
+                // Fan control using float interpolation on the freshly-read
+                // internal temperature (falls back to last good value if the
+                // read failed, since stats_ retains it).
+                uint16_t target_rpm;
+                if (this->stats_.internal_tmp_c >= static_cast<float>(this->temp_max_)) {
+                    target_rpm = this->rpm_max_;
+                } else if (this->stats_.internal_tmp_c <= static_cast<float>(this->temp_min_)) {
+                    target_rpm = this->rpm_min_;
+                } else {
+                    target_rpm = static_cast<uint16_t>(this->mapFloat(
+                        this->stats_.internal_tmp_c,
+                        static_cast<float>(this->temp_min_), static_cast<float>(this->temp_max_),
+                        static_cast<float>(this->rpm_min_),  static_cast<float>(this->rpm_max_)
+                    ));
+                }
+                this->setRPM(target_rpm);
 
-            if (ok) {
-                if (this->rpm_read_ != nullptr)   this->rpm_read_->publish_state(this->stats_.rpm_read);
-                if (this->rpm_target_ != nullptr) this->rpm_target_->publish_state(this->stats_.rpm_tgt);
+                if (ok) {
+                    if (this->intake_tmp_c_ != nullptr)   this->intake_tmp_c_->publish_state(this->stats_.intake_tmp_c);
+                    if (this->internal_tmp_c_ != nullptr) this->internal_tmp_c_->publish_state(this->stats_.internal_tmp_c);
+                    if (this->tmp_avg_ != nullptr)        this->tmp_avg_->publish_state(this->stats_.tmp_avg);
+                    if (this->rpm_read_ != nullptr)       this->rpm_read_->publish_state(this->stats_.rpm_read);
+                    if (this->rpm_target_ != nullptr)     this->rpm_target_->publish_state(this->stats_.rpm_tgt);
+                }
             }
             break;
     }
