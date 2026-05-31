@@ -11,7 +11,7 @@ static const char *const TAG = "hp_psu.sensor";
 // I2C primitives
 // ---------------------------------------------------------------------------
 
-bool HPPSUI2CComponent::readReg(uint16_t reg, uint16_t &out) {
+bool HPPSUI2CComponent::readReg(uint16_t reg, uint16_t &out, bool quiet) {
     uint8_t data[3] = {0, 0, 0};
 
     // Checksum is the 'secret sauce' — the PSU ignores reads without it
@@ -21,15 +21,19 @@ bool HPPSUI2CComponent::readReg(uint16_t reg, uint16_t &out) {
 
     auto write_err = I2CDevice::write(data, 2);
     if (write_err != i2c::ERROR_OK) {
-        ESP_LOGW(TAG, "HP PSU 0x%02X I2C write error on reg 0x%02X: %d",
-                 this->address_, reg, write_err);
+        if (quiet) ESP_LOGV(TAG, "HP PSU 0x%02X I2C write error on reg 0x%02X: %d",
+                            this->address_, reg, write_err);
+        else       ESP_LOGW(TAG, "HP PSU 0x%02X I2C write error on reg 0x%02X: %d",
+                            this->address_, reg, write_err);
         return false;
     }
 
     auto read_err = I2CDevice::read(data, 3);
     if (read_err != i2c::ERROR_OK) {
-        ESP_LOGW(TAG, "HP PSU 0x%02X I2C read error on reg 0x%02X: %d",
-                 this->address_, reg, read_err);
+        if (quiet) ESP_LOGV(TAG, "HP PSU 0x%02X I2C read error on reg 0x%02X: %d",
+                            this->address_, reg, read_err);
+        else       ESP_LOGW(TAG, "HP PSU 0x%02X I2C read error on reg 0x%02X: %d",
+                            this->address_, reg, read_err);
         return false;
     }
 
@@ -38,8 +42,10 @@ bool HPPSUI2CComponent::readReg(uint16_t reg, uint16_t &out) {
     // corrupt-but-ACKed reads (e.g. the 0xAA55 bus-glitch pattern) that a
     // bus-level ErrorCode check alone would let through.
     if (static_cast<uint8_t>(data[0] + data[1] + data[2]) != 0) {
-        ESP_LOGW(TAG, "HP PSU 0x%02X bad reply checksum on reg 0x%02X",
-                 this->address_, reg);
+        if (quiet) ESP_LOGV(TAG, "HP PSU 0x%02X bad reply checksum on reg 0x%02X",
+                            this->address_, reg);
+        else       ESP_LOGW(TAG, "HP PSU 0x%02X bad reply checksum on reg 0x%02X",
+                            this->address_, reg);
         return false;
     }
 
@@ -153,19 +159,19 @@ bool HPPSUI2CComponent::getPeakFlagStats() {
 
     // Each register is only read if a sensor is configured for it, so dropping
     // an unsupported reading from the YAML also drops its I2C transaction.
-    if (this->peak_watt_in_ != nullptr && this->readReg(REG_PEAK_WATTS_IN, raw) && raw != 0xFFFF) {
+    if (this->peak_watt_in_ != nullptr && this->readReg(REG_PEAK_WATTS_IN, raw, true) && raw != 0xFFFF) {
         this->stats_.peak_watt_in = static_cast<float>(raw);
         this->peak_watt_in_->publish_state(this->stats_.peak_watt_in);
     }
-    if (this->min_amp_in_ != nullptr && this->readReg(REG_MIN_AMPS_IN, raw) && raw != 0xFFFF) {
+    if (this->min_amp_in_ != nullptr && this->readReg(REG_MIN_AMPS_IN, raw, true) && raw != 0xFFFF) {
         this->stats_.min_amp_in = static_cast<float>(raw) / 64.0f;
         this->min_amp_in_->publish_state(this->stats_.min_amp_in);
     }
-    if (this->peak_amp_out_ != nullptr && this->readReg(REG_PEAK_AMPS_OUT, raw) && raw != 0xFFFF) {
+    if (this->peak_amp_out_ != nullptr && this->readReg(REG_PEAK_AMPS_OUT, raw, true) && raw != 0xFFFF) {
         this->stats_.peak_amp_out = static_cast<float>(raw) / 64.0f;
         this->peak_amp_out_->publish_state(this->stats_.peak_amp_out);
     }
-    if (this->flags_ != nullptr && this->readReg(REG_FLAGS, raw)) {
+    if (this->flags_ != nullptr && this->readReg(REG_FLAGS, raw, true)) {
         this->stats_.flags = raw;
         this->flags_->publish_state(this->stats_.flags);
     }
@@ -179,7 +185,7 @@ bool HPPSUI2CComponent::getEnergyStats() {
     // WATT_SECONDS_IN spans two consecutive registers (low, then high word).
     // Only read if an energy sensor is configured.
     if (this->energy_in_ != nullptr &&
-        this->readReg(REG_WATT_SEC_IN_LO, lo) && this->readReg(REG_WATT_SEC_IN_HI, hi)) {
+        this->readReg(REG_WATT_SEC_IN_LO, lo, true) && this->readReg(REG_WATT_SEC_IN_HI, hi, true)) {
         uint32_t watt_sec_raw = (static_cast<uint32_t>(hi) << 16) | lo;
         if (watt_sec_raw != 0xFFFFFFFF) {
             // raw/4 = watt-seconds; /3600 -> watt-hours  =>  raw / 14400
@@ -191,7 +197,7 @@ bool HPPSUI2CComponent::getEnergyStats() {
     }
 
     uint16_t raw = 0;
-    if (this->runtime_ != nullptr && this->readReg(REG_ON_SECONDS, raw) && raw != 0xFFFF) {
+    if (this->runtime_ != nullptr && this->readReg(REG_ON_SECONDS, raw, true) && raw != 0xFFFF) {
         this->stats_.runtime_s = static_cast<float>(raw) / 2.0f;
         this->runtime_->publish_state(this->stats_.runtime_s);
     }

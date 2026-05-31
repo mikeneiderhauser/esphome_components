@@ -134,7 +134,10 @@ class HPPSUI2CComponent : public esphome::EntityBase, public esphome::PollingCom
         return out_min + (x - in_min) * (out_max - out_min) / (in_max - in_min);
     }
 
-    bool readReg(uint16_t reg, uint16_t &out);
+    // quiet=true logs failures at VERBOSE instead of WARNING — used for the
+    // optional/diagnostic registers that some DPS-1200 variants don't support,
+    // so a flaky aggregate register can't spam the log.
+    bool readReg(uint16_t reg, uint16_t &out, bool quiet = false);
     void writeReg(uint8_t reg, uint16_t val);
 
     bool getPowerInStats();
