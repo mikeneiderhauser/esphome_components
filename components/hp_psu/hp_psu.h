@@ -113,7 +113,6 @@ class HPPSUI2CComponent : public esphome::EntityBase, public esphome::PollingCom
 
     void setRPM(uint16_t rpm_value);
     void publishNAN();
-    void disableAllSensors();
 
  protected:
     sensor::Sensor *rpm_read_{nullptr};

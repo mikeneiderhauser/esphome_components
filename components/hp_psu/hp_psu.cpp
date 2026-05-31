@@ -156,19 +156,8 @@ void HPPSUI2CComponent::publishNAN() {
     if (this->rpm_target_ != nullptr)     this->rpm_target_->publish_state(NAN);
 }
 
-void HPPSUI2CComponent::disableAllSensors() {
-    if (this->rpm_read_ != nullptr)       this->rpm_read_->set_disabled_by_default(true);
-    if (this->rpm_target_ != nullptr)     this->rpm_target_->set_disabled_by_default(true);
-    if (this->intake_tmp_c_ != nullptr)   this->intake_tmp_c_->set_disabled_by_default(true);
-    if (this->internal_tmp_c_ != nullptr) this->internal_tmp_c_->set_disabled_by_default(true);
-    if (this->tmp_avg_ != nullptr)        this->tmp_avg_->set_disabled_by_default(true);
-    if (this->volt_in_ != nullptr)        this->volt_in_->set_disabled_by_default(true);
-    if (this->amp_in_ != nullptr)         this->amp_in_->set_disabled_by_default(true);
-    if (this->watt_in_ != nullptr)        this->watt_in_->set_disabled_by_default(true);
-    if (this->volt_out_ != nullptr)       this->volt_out_->set_disabled_by_default(true);
-    if (this->amp_out_ != nullptr)        this->amp_out_->set_disabled_by_default(true);
-    if (this->watt_out_ != nullptr)       this->watt_out_->set_disabled_by_default(true);
-}
+// disabled_by_default is set at compile time by ESPHome's Python codegen
+// based on the YAML config — no runtime setter needed.
 
 // ---------------------------------------------------------------------------
 // ESPHome lifecycle
@@ -178,7 +167,6 @@ void HPPSUI2CComponent::setup() {
     if (this->is_disabled_by_default()) {
         ESP_LOGD(TAG, "HP PSU 0x%02X disabled_by_default — skipping setup.", this->address_);
         this->device_present_ = false;
-        this->disableAllSensors();
         return;
     }
 
@@ -186,7 +174,7 @@ void HPPSUI2CComponent::setup() {
              this->address_, this->temp_min_, this->temp_max_,
              this->rpm_min_, this->rpm_max_, this->temp_adjust_);
 
-    auto err = this->bus_->writev(this->address_, nullptr, 0);
+    auto err = this->write(nullptr, 0);
     if (err == i2c::ERROR_OK) {
         this->device_present_ = true;
         this->i2c_error_count_ = 0;
@@ -205,7 +193,7 @@ void HPPSUI2CComponent::update() {
 
     // Re-probe if device was absent or accumulated too many errors
     if (!this->device_present_ || this->i2c_error_count_ >= I2C_MAX_ERRORS) {
-        auto err = this->bus_->writev(this->address_, nullptr, 0);
+        auto err = this->write(nullptr, 0);
         if (err == i2c::ERROR_OK) {
             if (!this->device_present_)
                 ESP_LOGI(TAG, "HP PSU 0x%02X is back on I2C bus.", this->address_);
