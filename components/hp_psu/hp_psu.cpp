@@ -7,49 +7,31 @@ namespace hp_psu {
 
 static const char *const TAG = "hp_psu.sensor";
 
-uint16_t HPPSUI2CComponent::readReg(uint16_t reg) {
+// Returns true on success, false on I2C error. Result placed in out.
+bool HPPSUI2CComponent::readReg(uint16_t reg, uint16_t &out) {
     uint16_t cs = 0;
     uint8_t  regCS = 0;
-    uint8_t  data[3] = {0,0,0};
-    
-    cs=reg+((this->address_)<<1);
-    regCS=((0xff-cs)+1)&0xff;  //#this is the 'secret sauce' - if you don't add the checksum byte when reading a register the PSU will play dumb
+    uint8_t  data[3] = {0, 0, 0};
+
+    cs = reg + ((this->address_) << 1);
+    regCS = ((0xff - cs) + 1) & 0xff;  // checksum 'secret sauce'
     data[0] = reg;
     data[1] = regCS;
-    
-    // Send read request
-    //Wire.beginTransmission((this->address));
-    //Wire.write(data, 2);
-    I2CDevice::write(data, 2);
-    //Wire.endTransmission();
 
-    I2CDevice::read(data ,3);
-    return ((uint16_t)data[1] << 8) | (uint16_t)data[0];
-
-    /*
-    Wire.requestFrom((uint8_t)(this->address), (uint8_t)3);
-    unsigned long ms_prev = millis();
-    unsigned long ms_cur = millis();
-    
-    while(ms_cur - ms_prev < I2CREAD_TIMEOUT_MS) {
-        ms_cur = millis();
-        if (Wire.available()) {
-            
-            //data[0] = Wire.read(); // LSB
-            //data[1] = Wire.read(); // MSB
-            //data[2] = Wire.read(); // Checksum -> ignoring
-            #ifdef PSU_SERIAL_DEBUG
-            Serial.println(((uint16_t)data[1] << 8) | (uint16_t)data[0], HEX);
-            #endif
-            return ((uint16_t)data[1] << 8) | (uint16_t)data[0];
-        }
+    auto write_err = I2CDevice::write(data, 2);
+    if (write_err != i2c::ERROR_OK) {
+        ESP_LOGW(TAG, "HP PSU 0x%02X I2C write error on reg 0x%02X: %d", this->address_, reg, write_err);
+        return false;
     }
 
-    // TODO do we want to set disabled on bad read?
-    // this->enabled = false;
-    // TODO implement bad reg read counter then disable power supply
-    return 0xFFFF;  // Bad read
-    */
+    auto read_err = I2CDevice::read(data, 3);
+    if (read_err != i2c::ERROR_OK) {
+        ESP_LOGW(TAG, "HP PSU 0x%02X I2C read error on reg 0x%02X: %d", this->address_, reg, read_err);
+        return false;
+    }
+
+    out = ((uint16_t)data[1] << 8) | (uint16_t)data[0];
+    return true;
 }
 
 void HPPSUI2CComponent::writeReg(uint8_t reg, uint16_t val) {
@@ -57,41 +39,44 @@ void HPPSUI2CComponent::writeReg(uint8_t reg, uint16_t val) {
     uint8_t  valMSB = 0;
     uint16_t cs = 0;
     uint8_t  regCS = 0;
-    uint8_t  data[4] = {0,0,0,0};
+    uint8_t  data[4] = {0, 0, 0, 0};
 
-    // Most of the following is taken from the dump work from this github repo
-    // https://github.com/raplin/DPS-1200FB/blob/master/DPS-1200FB.py
+    valLSB = val & 0xff;
+    valMSB = val >> 8;
+    cs = ((this->address_) << 1) + reg + valLSB + valMSB;
+    regCS = ((0xff - cs) + 1) & 0xff;
 
-    // Extract MSB and LSB from RPM
-    valLSB=val&0xff;
-    valMSB=val>>8;
-    // calculate checksum - the checksum is the 'secret sauce'
-    cs=((this->address_)<<1)+reg+valLSB+valMSB;
-    regCS=((0xff-cs)+1)&0xff;
-
-    // pack the data
     data[0] = reg;
     data[1] = valLSB;
     data[2] = valMSB;
     data[3] = regCS;
 
-    // write to psu
-    // I2C Transaction
-    //Wire.beginTransmission((this->address));
-    //Wire.write(data,4);
-    I2CDevice::write(data, 4);
-    //Wire.endTransmission();
+    auto err = I2CDevice::write(data, 4);
+    if (err != i2c::ERROR_OK) {
+        ESP_LOGW(TAG, "HP PSU 0x%02X I2C write error on reg 0x%02X: %d", this->address_, reg, err);
+    }
+}
+
+void HPPSUI2CComponent::publishNAN() {
+    if (this->volt_in_ != nullptr)      this->volt_in_->publish_state(NAN);
+    if (this->amp_in_ != nullptr)       this->amp_in_->publish_state(NAN);
+    if (this->watt_in_ != nullptr)      this->watt_in_->publish_state(NAN);
+    if (this->volt_out_ != nullptr)     this->volt_out_->publish_state(NAN);
+    if (this->amp_out_ != nullptr)      this->amp_out_->publish_state(NAN);
+    if (this->watt_out_ != nullptr)     this->watt_out_->publish_state(NAN);
+    if (this->intake_tmp_c_ != nullptr) this->intake_tmp_c_->publish_state(NAN);
+    if (this->internal_tmp_c_ != nullptr) this->internal_tmp_c_->publish_state(NAN);
+    if (this->tmp_avg_ != nullptr)      this->tmp_avg_->publish_state(NAN);
+    if (this->rpm_read_ != nullptr)     this->rpm_read_->publish_state(NAN);
+    if (this->rpm_target_ != nullptr)   this->rpm_target_->publish_state(NAN);
 }
 
 void HPPSUI2CComponent::printStats() {
-
     ESP_LOGV(TAG, "ETMP: %f", this->stats.intake_tmp_c);
     ESP_LOGV(TAG, "ITMP: %f", this->stats.internal_tmp_c);
     ESP_LOGV(TAG, "AVG: %f", this->stats.tmp_avg);
-
     ESP_LOGV(TAG, "RPM: %d", this->stats.rpm_read);
     ESP_LOGV(TAG, "TGT: %d", this->stats.rpm_tgt);
-
     ESP_LOGV(TAG, "V_IN: %f", this->stats.volt_in);
     ESP_LOGV(TAG, "A_IN: %f", this->stats.amp_in);
     ESP_LOGV(TAG, "W_IN: %f", this->stats.watt_in);
@@ -100,96 +85,66 @@ void HPPSUI2CComponent::printStats() {
     ESP_LOGV(TAG, "W_OUT: %f", this->stats.watt_out);
 }
 
-void HPPSUI2CComponent::getPowerInStats(){
-    // initial read to prime
-    this->r = this->readReg(REG_TMP_INTAKE_READ);
+bool HPPSUI2CComponent::getPowerInStats() {
+    // Prime read
+    if (!this->readReg(REG_TMP_INTAKE_READ, this->r)) return false;
 
-    this->r = this->readReg(REG_VOLT_IN);
-    if (this->r != 0xFFFF) {
-        this->stats.volt_in = (this->r)/32;
-    }
+    if (this->readReg(REG_VOLT_IN, this->r))
+        this->stats.volt_in = (float)this->r / 32.0f;
 
-    this->r = this->readReg(REG_AMP_IN);
-    if (this->r != 0xFFFF) {
-        #ifdef EXPORT_RAW_PWR
-        this->stats.amp_in = (float)this->r;
-        #else
-        //this->stats.amp_in = this->r/ 128;
-        this->stats.amp_in = (this->r)/64;
-        #endif
-    }
+    if (this->readReg(REG_AMP_IN, this->r))
+        this->stats.amp_in = (float)this->r / 64.0f;
 
-    this->r= this->readReg(REG_WATT_IN);
-    if (this->r != 0xFFFF) {
-        #ifdef EXPORT_RAW_PWR
+    if (this->readReg(REG_WATT_IN, this->r))
         this->stats.watt_in = (float)this->r;
-        #else
-        //this->stats.watt_in = this->r/ 2;
-        this->stats.watt_in = (float)this->r;
-        #endif
-    }
+
+    return true;
 }
 
-void HPPSUI2CComponent::getPowerOutStats() {
-    // initial read to prime
-    this->r = this->readReg(REG_TMP_INTAKE_READ);
+bool HPPSUI2CComponent::getPowerOutStats() {
+    // Prime read
+    if (!this->readReg(REG_TMP_INTAKE_READ, this->r)) return false;
 
-    this->r = this->readReg(REG_VOLT_OUT);
-    if (this->r != 0xFFFF) {
-        this->stats.volt_out = (this->r)/256;
-    }
+    if (this->readReg(REG_VOLT_OUT, this->r))
+        this->stats.volt_out = (float)this->r / 256.0f;
 
-    this->r = this->readReg(REG_AMP_OUT);
-    if (this->r != 0xFFFF) {
-        #ifdef EXPORT_RAW_PWR
-        this->stats.amp_out = (float)this->r;
-        #else
-        //this->stats.amp_out = this->r/ 128;
-        this->stats.amp_out = (this->r)/64;
-        #endif
-    }
+    if (this->readReg(REG_AMP_OUT, this->r))
+        this->stats.amp_out = (float)this->r / 64.0f;
 
-    this->r = this->readReg(REG_WATT_OUT);
-    if (this->r != 0xFFFF) {
-        #ifdef EXPORT_RAW_PWR
+    if (this->readReg(REG_WATT_OUT, this->r))
         this->stats.watt_out = (float)this->r;
-        #else
-        //this->stats.watt_out = this->r/ 2;
-        this->stats.watt_out = (float)this->r;
-        #endif
-    }
+
+    return true;
 }
 
-void HPPSUI2CComponent::getTemperatureStats() {
-    // initial read to prime
-    this->r = this->readReg(REG_TMP_INTAKE_READ);
+bool HPPSUI2CComponent::getTemperatureStats() {
+    // Prime read
+    if (!this->readReg(REG_TMP_INTAKE_READ, this->r)) return false;
 
-    this->r = this->readReg(REG_TMP_INTAKE_READ);
-    this->stats.intake_tmp_c = this->r;
-    if (this->r != 0xFFFF) {
-        this->tmp_c_reading = this->f2c(((this->r)/32) + ADJUST_TMP_F);
-        if(this->tmp_c_reading < TMP_OUTLIER_MAX) {
-            this->stats.intake_tmp_c = this->tmp_c_reading;    
+    if (this->readReg(REG_TMP_INTAKE_READ, this->r)) {
+        this->tmp_c_reading = this->f2c(((float)this->r / 32.0f) + this->temp_adjust_);
+        if (this->tmp_c_reading < TMP_OUTLIER_MAX) {
+            this->stats.intake_tmp_c = this->tmp_c_reading;
         }
     }
 
-    this->r = this->readReg(REG_TMP_INTERNAL_READ);
-    if (this->r != 0xFFFF) {
-        this->tmp_c_reading = this->f2c(((this->r)/32) + ADJUST_TMP_F);
-        if(this->tmp_c_reading < TMP_OUTLIER_MAX) {
-            this->stats.internal_tmp_c = this->tmp_c_reading;    
+    if (this->readReg(REG_TMP_INTERNAL_READ, this->r)) {
+        this->tmp_c_reading = this->f2c(((float)this->r / 32.0f) + this->temp_adjust_);
+        if (this->tmp_c_reading < TMP_OUTLIER_MAX) {
+            this->stats.internal_tmp_c = this->tmp_c_reading;
         }
     }
 
-    this->stats.tmp_avg = (this->stats.intake_tmp_c + this->stats.internal_tmp_c)/2;
+    this->stats.tmp_avg = (this->stats.intake_tmp_c + this->stats.internal_tmp_c) / 2.0f;
+    return true;
 }
 
-void HPPSUI2CComponent::getRPMStats() {
-
-    this->r = this->readReg(REG_RPM_READ);
-    if (this->r != 0xFFFF) {
+bool HPPSUI2CComponent::getRPMStats() {
+    if (this->readReg(REG_RPM_READ, this->r)) {
         this->stats.rpm_read = this->r;
+        return true;
     }
+    return false;
 }
 
 void HPPSUI2CComponent::setRPM(uint16_t rpm_value) {
@@ -198,153 +153,135 @@ void HPPSUI2CComponent::setRPM(uint16_t rpm_value) {
 }
 
 void HPPSUI2CComponent::setup() {
-    if(this->is_disabled_by_default()) {
-        // short circuit setup
+    if (this->is_disabled_by_default()) {
         ESP_LOGD(TAG, "HP PSU 0x%02X is marked as disabled_by_default. Skipping setup.", this->address_);
         this->device_present = false;
-        rpm_read_->set_disabled_by_default(this->is_disabled_by_default());
-        rpm_target_->set_disabled_by_default(this->is_disabled_by_default());
 
-        intake_tmp_c_->set_disabled_by_default(this->is_disabled_by_default());
-        internal_tmp_c_->set_disabled_by_default(this->is_disabled_by_default());
-        tmp_avg_->set_disabled_by_default(this->is_disabled_by_default());
-
-        volt_in_->set_disabled_by_default(this->is_disabled_by_default());
-        amp_in_->set_disabled_by_default(this->is_disabled_by_default());
-        watt_in_->set_disabled_by_default(this->is_disabled_by_default());
-
-        volt_out_->set_disabled_by_default(this->is_disabled_by_default());
-        amp_out_->set_disabled_by_default(this->is_disabled_by_default());
-        watt_out_->set_disabled_by_default(this->is_disabled_by_default());
+        // Guard against optional sensors not being configured
+        if (rpm_read_ != nullptr)       rpm_read_->set_disabled_by_default(true);
+        if (rpm_target_ != nullptr)     rpm_target_->set_disabled_by_default(true);
+        if (intake_tmp_c_ != nullptr)   intake_tmp_c_->set_disabled_by_default(true);
+        if (internal_tmp_c_ != nullptr) internal_tmp_c_->set_disabled_by_default(true);
+        if (tmp_avg_ != nullptr)        tmp_avg_->set_disabled_by_default(true);
+        if (volt_in_ != nullptr)        volt_in_->set_disabled_by_default(true);
+        if (amp_in_ != nullptr)         amp_in_->set_disabled_by_default(true);
+        if (watt_in_ != nullptr)        watt_in_->set_disabled_by_default(true);
+        if (volt_out_ != nullptr)       volt_out_->set_disabled_by_default(true);
+        if (amp_out_ != nullptr)        amp_out_->set_disabled_by_default(true);
+        if (watt_out_ != nullptr)       watt_out_->set_disabled_by_default(true);
         return;
     }
 
-    ESP_LOGD(TAG, "Setting up HP PSU 0x%02X", this->address_);
+    ESP_LOGD(TAG, "Setting up HP PSU 0x%02X (temp_min=%d temp_max=%d rpm_min=%d rpm_max=%d)",
+             this->address_, this->temp_min_, this->temp_max_, this->rpm_min_, this->rpm_max_);
 
-    // Check for the i2c device during setup to ensure its connected
-    // TODO update this state every N polling interval
     auto err = this->bus_->writev(this->address_, nullptr, 0);
-    if (err == 0) { // ERROR_OK
+    if (err == i2c::ERROR_OK) {
         this->device_present = true;
-    }
-    else
-    {
-        ESP_LOGW(TAG, "HP PSU Device at address 0x%02X is not in i2c scan. Setting Device Present to false.", this->address_);
+        this->i2c_error_count_ = 0;
+    } else {
+        ESP_LOGW(TAG, "HP PSU 0x%02X not found on I2C bus during setup.", this->address_);
         this->device_present = false;
     }
-    // if error do this
-    //ESP_LOGW(TAG, "Timeout loading NVM.");
-    //this->mark_failed();
-    //return; // only on error
 }
 
 void HPPSUI2CComponent::update() {
-    if(this->is_disabled_by_default()) {
-        // short circuit update
-        ESP_LOGV(TAG, "HP PSU 0x%02X is marked as disabled_by_default. Skipping update.", this->address_);
-        this->device_present = false;
+    if (this->is_disabled_by_default()) {
+        ESP_LOGV(TAG, "HP PSU 0x%02X disabled_by_default. Skipping update.", this->address_);
         return;
     }
 
-    if (! this->device_present){
-        ESP_LOGW(TAG, "HP PSU Device at address 0x%02X is not in i2c scan. Skipping stats collection.", this->address_);
-        this->status_set_warning();
-        return;
+    // Re-probe device presence if it was previously absent or accumulated errors
+    if (!this->device_present || this->i2c_error_count_ >= I2C_MAX_ERRORS) {
+        auto err = this->bus_->writev(this->address_, nullptr, 0);
+        if (err == i2c::ERROR_OK) {
+            if (!this->device_present) {
+                ESP_LOGI(TAG, "HP PSU 0x%02X is back on I2C bus.", this->address_);
+            }
+            this->device_present = true;
+            this->i2c_error_count_ = 0;
+            this->status_clear_warning();
+        } else {
+            ESP_LOGW(TAG, "HP PSU 0x%02X not found on I2C bus. Skipping stats.", this->address_);
+            this->device_present = false;
+            this->status_set_warning();
+            this->publishNAN();
+            return;
+        }
     }
 
-    ESP_LOGV(TAG, "Updating HP PSU  0x%02X", this->address_);
-    //this->getStats();
+    ESP_LOGV(TAG, "Updating HP PSU 0x%02X (cycle %d)", this->address_, this->stats_idx);
+
+    bool ok = false;
+
     if (this->stats_idx == 0) {
-        this->getPowerInStats();
-        //this->printStats();
+        ok = this->getPowerInStats();
         this->stats_idx++;
-
-        // Publish Sensor Data
-        if (this->volt_in_ != nullptr) {
-            this->volt_in_->publish_state(this->stats.volt_in);
-        }
-
-        if (this->amp_in_ != nullptr) {
-            this->amp_in_->publish_state(this->stats.amp_in);
-        }
-
-        if (this->watt_in_ != nullptr) {
-            this->watt_in_->publish_state(this->stats.watt_in);
+        if (ok) {
+            if (this->volt_in_ != nullptr)  this->volt_in_->publish_state(this->stats.volt_in);
+            if (this->amp_in_ != nullptr)   this->amp_in_->publish_state(this->stats.amp_in);
+            if (this->watt_in_ != nullptr)  this->watt_in_->publish_state(this->stats.watt_in);
         }
 
     } else if (this->stats_idx == 1) {
-        this->getPowerOutStats();
-        //this->printStats();
+        ok = this->getPowerOutStats();
         this->stats_idx++;
-
-        // Publish Sensor Data
-        if (this->volt_out_ != nullptr) {
-            this->volt_out_->publish_state(this->stats.volt_out);
-        }
-
-        if (this->amp_out_ != nullptr) {
-            this->amp_out_->publish_state(this->stats.amp_out);
-        }
-
-        if (this->watt_out_ != nullptr) {
-            this->watt_out_->publish_state(this->stats.watt_out);
+        if (ok) {
+            if (this->volt_out_ != nullptr) this->volt_out_->publish_state(this->stats.volt_out);
+            if (this->amp_out_ != nullptr)  this->amp_out_->publish_state(this->stats.amp_out);
+            if (this->watt_out_ != nullptr) this->watt_out_->publish_state(this->stats.watt_out);
         }
 
     } else if (this->stats_idx == 2) {
-        this->getTemperatureStats();
-        //this->printStats();
+        ok = this->getTemperatureStats();
         this->stats_idx++;
-
-        // Publish Sensor Data
-        if (this->intake_tmp_c_ != nullptr) {
-            this->intake_tmp_c_->publish_state(this->stats.intake_tmp_c);
+        if (ok) {
+            if (this->intake_tmp_c_ != nullptr)   this->intake_tmp_c_->publish_state(this->stats.intake_tmp_c);
+            if (this->internal_tmp_c_ != nullptr) this->internal_tmp_c_->publish_state(this->stats.internal_tmp_c);
+            if (this->tmp_avg_ != nullptr)        this->tmp_avg_->publish_state(this->stats.tmp_avg);
         }
 
-        if (this->internal_tmp_c_ != nullptr) {
-            this->internal_tmp_c_->publish_state(this->stats.internal_tmp_c);
-        }
-
-        if (this->tmp_avg_ != nullptr) {
-            this->tmp_avg_->publish_state(this->stats.tmp_avg);
-        }
     } else if (this->stats_idx == 3) {
-        this->getRPMStats();
-        //this->printStats();
-        this->stats_idx = 0; // reset stats idx
+        ok = this->getRPMStats();
+        this->stats_idx = 0; // reset cycle
 
-        // handle fan control thresholds based on internal temp
-        // temps were read in previous cycle
-        if ( this->stats.internal_tmp_c > this->TMAX) {
-            // handle above tmp max
-            this->stats.rpm_tgt = RPM_MAX;
-        } else if (this->stats.internal_tmp_c < this->TMIN) {
-            // handle below tmp min
-            this->stats.rpm_tgt = RPM_MIN;
+        // Fan control based on internal temp from previous cycle
+        if (this->stats.internal_tmp_c > this->temp_max_) {
+            this->stats.rpm_tgt = this->rpm_max_;
+        } else if (this->stats.internal_tmp_c < this->temp_min_) {
+            this->stats.rpm_tgt = this->rpm_min_;
         } else {
-            // dynamically control rpm based on temp scale
-            this->stats.rpm_tgt = map(this->stats.internal_tmp_c, TMIN, TMAX, RPM_MIN, RPM_MAX);
+            this->stats.rpm_tgt = (uint16_t)map(
+                (long)this->stats.internal_tmp_c,
+                (long)this->temp_min_, (long)this->temp_max_,
+                (long)this->rpm_min_,  (long)this->rpm_max_
+            );
         }
-
         this->setRPM(this->stats.rpm_tgt);
 
-        // Publish Sensor Data
-        if (this->rpm_read_ != nullptr) {
-            this->rpm_read_->publish_state(this->stats.rpm_read);
-        }
-
-        if (this->rpm_target_ != nullptr) {
-            this->rpm_target_->publish_state(this->stats.rpm_tgt);
+        if (ok) {
+            if (this->rpm_read_ != nullptr)   this->rpm_read_->publish_state(this->stats.rpm_read);
+            if (this->rpm_target_ != nullptr) this->rpm_target_->publish_state(this->stats.rpm_tgt);
         }
     }
 
-    this->status_clear_warning();
+    if (!ok) {
+        this->i2c_error_count_++;
+        ESP_LOGW(TAG, "HP PSU 0x%02X I2C error on cycle %d (%d/%d)",
+                 this->address_, this->stats_idx, this->i2c_error_count_, I2C_MAX_ERRORS);
+        this->status_set_warning();
+    } else {
+        this->i2c_error_count_ = 0;
+        this->status_clear_warning();
+    }
 }
 
 void HPPSUI2CComponent::dump_config() {
-    char buffer[50];
-    ESP_LOGCONFIG("HP_PSU: ", "DUMP");
-    sprintf(buffer, "Address: 0x%02X", this->address_);
-    ESP_LOGCONFIG("HP_PSU: ", buffer);
+    ESP_LOGCONFIG(TAG, "HP PSU:");
+    ESP_LOGCONFIG(TAG, "  Address: 0x%02X", this->address_);
+    ESP_LOGCONFIG(TAG, "  Temp Min: %d°C  Temp Max: %d°C", this->temp_min_, this->temp_max_);
+    ESP_LOGCONFIG(TAG, "  RPM Min: %d  RPM Max: %d", this->rpm_min_, this->rpm_max_);
+    ESP_LOGCONFIG(TAG, "  Temp Adjust: %d°F", this->temp_adjust_);
 }
 
 

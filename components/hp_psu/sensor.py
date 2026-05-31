@@ -1,5 +1,5 @@
 import esphome.codegen as cg
-from esphome.components import sensor,i2c
+from esphome.components import sensor, i2c
 import esphome.config_validation as cv
 
 from esphome.const import (
@@ -31,27 +31,35 @@ HPPSUI2CComponent = hp_psu_ns.class_(
     "HPPSUI2CComponent", cg.PollingComponent, i2c.I2CDevice
 )
 
-CONF_INTAKE_TEMP = "intake_temperature"
-CONF_INTERNAL_TEMP = "internal_temperature"
-CONF_AVG_TEMP = "average_temperature"
+CONF_INTAKE_TEMP    = "intake_temperature"
+CONF_INTERNAL_TEMP  = "internal_temperature"
+CONF_AVG_TEMP       = "average_temperature"
 
-CONF_INPUT_VOLTAGE = "ac_voltage"
-CONF_INPUT_CURRENT = "ac_current"
-CONF_INPUT_POWER = "ac_power"
+CONF_INPUT_VOLTAGE  = "ac_voltage"
+CONF_INPUT_CURRENT  = "ac_current"
+CONF_INPUT_POWER    = "ac_power"
 
-CONF_OUTPUT_VOLTAGE = "dc_voltage" 
+CONF_OUTPUT_VOLTAGE = "dc_voltage"
 CONF_OUTPUT_CURRENT = "dc_current"
-CONF_OUTPUT_POWER = "dc_power"
+CONF_OUTPUT_POWER   = "dc_power"
 
 CONF_FAN_TARGET_RPM = "fan_target_rpm"
 CONF_FAN_ACTUAL_RPM = "fan_actual_rpm"
+
+# Fan / temp control
+CONF_TEMP_MIN    = "temp_min"
+CONF_TEMP_MAX    = "temp_max"
+CONF_RPM_MIN     = "rpm_min"
+CONF_RPM_MAX     = "rpm_max"
+CONF_TEMP_ADJUST = "temp_adjust"
 
 
 CONFIG_SCHEMA = (
     cv.Schema(
         {
-            # Temperatures
             cv.GenerateID(): cv.declare_id(HPPSUI2CComponent),
+
+            # Temperatures
             cv.Optional(CONF_INTAKE_TEMP): sensor.sensor_schema(
                 unit_of_measurement=UNIT_CELSIUS,
                 accuracy_decimals=2,
@@ -70,6 +78,7 @@ CONFIG_SCHEMA = (
                 device_class=DEVICE_CLASS_TEMPERATURE,
                 state_class=STATE_CLASS_MEASUREMENT,
             ),
+
             # AC Side
             cv.Optional(CONF_INPUT_VOLTAGE): sensor.sensor_schema(
                 unit_of_measurement=UNIT_VOLT,
@@ -89,6 +98,7 @@ CONFIG_SCHEMA = (
                 device_class=DEVICE_CLASS_POWER,
                 state_class=STATE_CLASS_MEASUREMENT,
             ),
+
             # DC Side
             cv.Optional(CONF_OUTPUT_VOLTAGE): sensor.sensor_schema(
                 unit_of_measurement=UNIT_VOLT,
@@ -108,13 +118,25 @@ CONFIG_SCHEMA = (
                 device_class=DEVICE_CLASS_POWER,
                 state_class=STATE_CLASS_MEASUREMENT,
             ),
-            # FAN RPM
+
+            # Fan RPM
             cv.Optional(CONF_FAN_TARGET_RPM): sensor.sensor_schema(
+                unit_of_measurement="RPM",
+                accuracy_decimals=0,
                 state_class=STATE_CLASS_MEASUREMENT,
             ),
             cv.Optional(CONF_FAN_ACTUAL_RPM): sensor.sensor_schema(
+                unit_of_measurement="RPM",
+                accuracy_decimals=0,
                 state_class=STATE_CLASS_MEASUREMENT,
             ),
+
+            # Fan / temp control (optional, defaults handled in C++)
+            cv.Optional(CONF_TEMP_MIN,    default=40):    cv.int_range(min=-50, max=200),
+            cv.Optional(CONF_TEMP_MAX,    default=90):    cv.int_range(min=-50, max=200),
+            cv.Optional(CONF_RPM_MIN,     default=3400):  cv.positive_int,
+            cv.Optional(CONF_RPM_MAX,     default=14000): cv.positive_int,
+            cv.Optional(CONF_TEMP_ADJUST, default=18):    cv.int_,
         }
     )
     .extend(cv.polling_component_schema("5s"))
@@ -127,20 +149,20 @@ async def to_code(config):
     await cg.register_component(var, config)
     await i2c.register_i2c_device(var, config)
 
-    # Temperature
+    # Temperature sensors
     if intake_temp_config := config.get(CONF_INTAKE_TEMP):
         sens = await sensor.new_sensor(intake_temp_config)
         cg.add(var.set_intake_tmp_c(sens))
 
     if internal_temp_config := config.get(CONF_INTERNAL_TEMP):
         sens = await sensor.new_sensor(internal_temp_config)
-        cg.add(var.internal_tmp_c(sens))
+        cg.add(var.set_internal_tmp_c(sens))  # fixed: was missing set_ prefix
 
     if avg_temp_config := config.get(CONF_AVG_TEMP):
         sens = await sensor.new_sensor(avg_temp_config)
-        cg.add(var.tmp_avg(sens))
+        cg.add(var.set_tmp_avg(sens))  # fixed: was missing set_ prefix
 
-    # AC
+    # AC sensors
     if input_voltage_config := config.get(CONF_INPUT_VOLTAGE):
         sens = await sensor.new_sensor(input_voltage_config)
         cg.add(var.set_volt_in(sens))
@@ -153,7 +175,7 @@ async def to_code(config):
         sens = await sensor.new_sensor(input_power_config)
         cg.add(var.set_watt_in(sens))
 
-    # DC
+    # DC sensors
     if output_voltage_config := config.get(CONF_OUTPUT_VOLTAGE):
         sens = await sensor.new_sensor(output_voltage_config)
         cg.add(var.set_volt_out(sens))
@@ -166,7 +188,7 @@ async def to_code(config):
         sens = await sensor.new_sensor(output_power_config)
         cg.add(var.set_watt_out(sens))
 
-    # RPM
+    # RPM sensors
     if fan_target_config := config.get(CONF_FAN_TARGET_RPM):
         sens = await sensor.new_sensor(fan_target_config)
         cg.add(var.set_rpm_target(sens))
@@ -174,5 +196,12 @@ async def to_code(config):
     if fan_actual_config := config.get(CONF_FAN_ACTUAL_RPM):
         sens = await sensor.new_sensor(fan_actual_config)
         cg.add(var.set_rpm_read(sens))
+
+    # Fan / temp control config
+    cg.add(var.set_temp_min(config[CONF_TEMP_MIN]))
+    cg.add(var.set_temp_max(config[CONF_TEMP_MAX]))
+    cg.add(var.set_rpm_min(config[CONF_RPM_MIN]))
+    cg.add(var.set_rpm_max(config[CONF_RPM_MAX]))
+    cg.add(var.set_temp_adjust(config[CONF_TEMP_ADJUST]))
 
     return var
