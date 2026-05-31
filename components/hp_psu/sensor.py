@@ -156,13 +156,15 @@ async def to_code(config):
     await i2c.register_i2c_device(var, config)
 
     enabled = config[CONF_ENABLED]
-    # Track every child sensor so a disabled slot can hide them all in HA.
-    child_sensors = []
 
     async def add_sensor(conf, setter):
+        # A disabled slot hides its entities in HA. We inject disabled_by_default
+        # into the child config before new_sensor() so ESPHome's codegen applies
+        # it (sensor::Sensor has no runtime set_disabled_by_default setter).
+        if not enabled:
+            conf[CONF_DISABLED_BY_DEFAULT] = True
         sens = await sensor.new_sensor(conf)
         cg.add(setter(sens))
-        child_sensors.append(sens)
 
     # Temperature sensors
     if c := config.get(CONF_INTAKE_TEMP):
@@ -195,11 +197,8 @@ async def to_code(config):
         await add_sensor(c, var.set_rpm_read)
 
     # A disabled slot is treated as physically unpopulated: skip all I2C
-    # polling in C++ and hide its entities in HA.
+    # polling in C++ (entity hiding handled per-sensor above).
     cg.add(var.set_psu_disabled(not enabled))
-    if not enabled:
-        for sens in child_sensors:
-            cg.add(sens.set_disabled_by_default(True))
 
     # Fan / temp control config
     cg.add(var.set_temp_min(config[CONF_TEMP_MIN]))
