@@ -164,8 +164,8 @@ void HPPSUI2CComponent::publishNAN() {
 // ---------------------------------------------------------------------------
 
 void HPPSUI2CComponent::setup() {
-    if (this->is_disabled_by_default()) {
-        ESP_LOGD(TAG, "HP PSU 0x%02X disabled_by_default — skipping setup.", this->address_);
+    if (this->psu_disabled_) {
+        ESP_LOGD(TAG, "HP PSU 0x%02X marked disabled — skipping setup and polling.", this->address_);
         this->device_present_ = false;
         return;
     }
@@ -186,10 +186,8 @@ void HPPSUI2CComponent::setup() {
 }
 
 void HPPSUI2CComponent::update() {
-    if (this->is_disabled_by_default()) {
-        ESP_LOGV(TAG, "HP PSU 0x%02X disabled_by_default — skipping update.", this->address_);
-        return;
-    }
+    if (this->psu_disabled_)
+        return;  // unused slot — stay completely silent
 
     // Re-probe if device was absent or accumulated too many errors
     if (!this->device_present_ || this->i2c_error_count_ >= I2C_MAX_ERRORS) {

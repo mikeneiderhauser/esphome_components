@@ -66,6 +66,10 @@ class HPPSUI2CComponent : public esphome::EntityBase, public esphome::PollingCom
     void set_amp_out(sensor::Sensor *s)        { amp_out_ = s; }
     void set_watt_out(sensor::Sensor *s)       { watt_out_ = s; }
 
+    // Marks this PSU slot as unused — fully skips setup/polling when true.
+    // Wired from the YAML `disabled_by_default` value in to_code().
+    void set_psu_disabled(bool disabled) { psu_disabled_ = disabled; }
+
     // Fan / temp control setters
     void set_temp_min(int v)     { temp_min_ = v; }
     void set_temp_max(int v)     { temp_max_ = v; }
@@ -88,6 +92,7 @@ class HPPSUI2CComponent : public esphome::EntityBase, public esphome::PollingCom
     uint16_t rpm_max_{DEFAULT_RPM_MAX};
     int      temp_adjust_{DEFAULT_TEMP_ADJUST};
 
+    bool    psu_disabled_{false};
     bool    device_present_{false};
     uint8_t i2c_error_count_{0};
     static const uint8_t I2C_MAX_ERRORS{3};

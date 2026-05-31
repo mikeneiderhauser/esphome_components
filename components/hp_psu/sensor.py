@@ -197,6 +197,11 @@ async def to_code(config):
         sens = await sensor.new_sensor(fan_actual_config)
         cg.add(var.set_rpm_read(sens))
 
+    # Use the entity's disabled_by_default flag to also disable hardware polling.
+    # A PSU slot that is disabled_by_default is treated as physically unpopulated:
+    # setup() and update() short-circuit so no I2C probing or NAN spam occurs.
+    cg.add(var.set_psu_disabled(config[CONF_DISABLED_BY_DEFAULT]))
+
     # Fan / temp control config
     cg.add(var.set_temp_min(config[CONF_TEMP_MIN]))
     cg.add(var.set_temp_max(config[CONF_TEMP_MAX]))
