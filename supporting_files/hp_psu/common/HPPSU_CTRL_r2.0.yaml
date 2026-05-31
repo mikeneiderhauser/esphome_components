@@ -82,7 +82,7 @@ packages:
     psu_addr: 0x58,
     io_exp_input_pin: 5,
     io_exp_output_pin: 6,
-    disable_by_default: "${disable_by_default_psu1}"
+    enable: "${enable_psu1}"
   }}
 
   psu_2: !include { file: pkgs/hp_psu.yaml, vars: {
@@ -91,7 +91,7 @@ packages:
     psu_addr: 0x5C,
     io_exp_input_pin: 4,
     io_exp_output_pin: 7,
-    disable_by_default: "${disable_by_default_psu2}"
+    enable: "${enable_psu2}"
   }}
 
   psu_3: !include { file: pkgs/hp_psu.yaml, vars: {
@@ -100,7 +100,7 @@ packages:
     psu_addr: 0x5A,
     io_exp_input_pin: 3,
     io_exp_output_pin: 0,
-    disable_by_default: "${disable_by_default_psu3}"
+    enable: "${enable_psu3}"
   }}
 
   psu_4: !include { file: pkgs/hp_psu.yaml, vars: {
@@ -109,7 +109,7 @@ packages:
     psu_addr: 0x5E,
     io_exp_input_pin: 2,
     io_exp_output_pin: 1,
-    disable_by_default: "${disable_by_default_psu4}"
+    enable: "${enable_psu4}"
   }}
 
 

@@ -46,6 +46,8 @@ CONF_OUTPUT_POWER   = "dc_power"
 CONF_FAN_TARGET_RPM = "fan_target_rpm"
 CONF_FAN_ACTUAL_RPM = "fan_actual_rpm"
 
+CONF_ENABLED = "enabled"
+
 # Fan / temp control
 CONF_TEMP_MIN    = "temp_min"
 CONF_TEMP_MAX    = "temp_max"
@@ -131,6 +133,10 @@ CONFIG_SCHEMA = (
                 state_class=STATE_CLASS_MEASUREMENT,
             ),
 
+            # When false, the PSU slot is treated as unpopulated: no I2C
+            # probing, no polling, and its entities are hidden in HA.
+            cv.Optional(CONF_ENABLED, default=True): cv.boolean,
+
             # Fan / temp control (optional, defaults handled in C++)
             cv.Optional(CONF_TEMP_MIN,    default=40):    cv.int_range(min=-50, max=200),
             cv.Optional(CONF_TEMP_MAX,    default=90):    cv.int_range(min=-50, max=200),
@@ -149,58 +155,51 @@ async def to_code(config):
     await cg.register_component(var, config)
     await i2c.register_i2c_device(var, config)
 
+    enabled = config[CONF_ENABLED]
+    # Track every child sensor so a disabled slot can hide them all in HA.
+    child_sensors = []
+
+    async def add_sensor(conf, setter):
+        sens = await sensor.new_sensor(conf)
+        cg.add(setter(sens))
+        child_sensors.append(sens)
+
     # Temperature sensors
-    if intake_temp_config := config.get(CONF_INTAKE_TEMP):
-        sens = await sensor.new_sensor(intake_temp_config)
-        cg.add(var.set_intake_tmp_c(sens))
-
-    if internal_temp_config := config.get(CONF_INTERNAL_TEMP):
-        sens = await sensor.new_sensor(internal_temp_config)
-        cg.add(var.set_internal_tmp_c(sens))  # fixed: was missing set_ prefix
-
-    if avg_temp_config := config.get(CONF_AVG_TEMP):
-        sens = await sensor.new_sensor(avg_temp_config)
-        cg.add(var.set_tmp_avg(sens))  # fixed: was missing set_ prefix
+    if c := config.get(CONF_INTAKE_TEMP):
+        await add_sensor(c, var.set_intake_tmp_c)
+    if c := config.get(CONF_INTERNAL_TEMP):
+        await add_sensor(c, var.set_internal_tmp_c)
+    if c := config.get(CONF_AVG_TEMP):
+        await add_sensor(c, var.set_tmp_avg)
 
     # AC sensors
-    if input_voltage_config := config.get(CONF_INPUT_VOLTAGE):
-        sens = await sensor.new_sensor(input_voltage_config)
-        cg.add(var.set_volt_in(sens))
-
-    if input_current_config := config.get(CONF_INPUT_CURRENT):
-        sens = await sensor.new_sensor(input_current_config)
-        cg.add(var.set_amp_in(sens))
-
-    if input_power_config := config.get(CONF_INPUT_POWER):
-        sens = await sensor.new_sensor(input_power_config)
-        cg.add(var.set_watt_in(sens))
+    if c := config.get(CONF_INPUT_VOLTAGE):
+        await add_sensor(c, var.set_volt_in)
+    if c := config.get(CONF_INPUT_CURRENT):
+        await add_sensor(c, var.set_amp_in)
+    if c := config.get(CONF_INPUT_POWER):
+        await add_sensor(c, var.set_watt_in)
 
     # DC sensors
-    if output_voltage_config := config.get(CONF_OUTPUT_VOLTAGE):
-        sens = await sensor.new_sensor(output_voltage_config)
-        cg.add(var.set_volt_out(sens))
-
-    if output_current_config := config.get(CONF_OUTPUT_CURRENT):
-        sens = await sensor.new_sensor(output_current_config)
-        cg.add(var.set_amp_out(sens))
-
-    if output_power_config := config.get(CONF_OUTPUT_POWER):
-        sens = await sensor.new_sensor(output_power_config)
-        cg.add(var.set_watt_out(sens))
+    if c := config.get(CONF_OUTPUT_VOLTAGE):
+        await add_sensor(c, var.set_volt_out)
+    if c := config.get(CONF_OUTPUT_CURRENT):
+        await add_sensor(c, var.set_amp_out)
+    if c := config.get(CONF_OUTPUT_POWER):
+        await add_sensor(c, var.set_watt_out)
 
     # RPM sensors
-    if fan_target_config := config.get(CONF_FAN_TARGET_RPM):
-        sens = await sensor.new_sensor(fan_target_config)
-        cg.add(var.set_rpm_target(sens))
+    if c := config.get(CONF_FAN_TARGET_RPM):
+        await add_sensor(c, var.set_rpm_target)
+    if c := config.get(CONF_FAN_ACTUAL_RPM):
+        await add_sensor(c, var.set_rpm_read)
 
-    if fan_actual_config := config.get(CONF_FAN_ACTUAL_RPM):
-        sens = await sensor.new_sensor(fan_actual_config)
-        cg.add(var.set_rpm_read(sens))
-
-    # Use the entity's disabled_by_default flag to also disable hardware polling.
-    # A PSU slot that is disabled_by_default is treated as physically unpopulated:
-    # setup() and update() short-circuit so no I2C probing or NAN spam occurs.
-    cg.add(var.set_psu_disabled(config[CONF_DISABLED_BY_DEFAULT]))
+    # A disabled slot is treated as physically unpopulated: skip all I2C
+    # polling in C++ and hide its entities in HA.
+    cg.add(var.set_psu_disabled(not enabled))
+    if not enabled:
+        for sens in child_sensors:
+            cg.add(sens.set_disabled_by_default(True))
 
     # Fan / temp control config
     cg.add(var.set_temp_min(config[CONF_TEMP_MIN]))

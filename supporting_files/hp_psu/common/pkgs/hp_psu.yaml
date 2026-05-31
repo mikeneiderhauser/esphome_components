@@ -8,7 +8,6 @@ switch:
       mode:
         output: true
     restore_mode: RESTORE_DEFAULT_OFF
-    disabled_by_default: "${disable_by_default}"
 
 binary_sensor:
   - platform: gpio
@@ -19,7 +18,6 @@ binary_sensor:
       number: ${io_exp_input_pin}
       mode: INPUT_PULLUP
       interrupt: FALLING # CHANGE, RISING, FALLING
-    disabled_by_default: "${disable_by_default}"
     filters:
       - delayed_on: 10ms  # Debounce for 10ms to avoid multiple triggers
       - delayed_off: 10ms
@@ -32,7 +30,7 @@ sensor:
   - platform: hp_psu
     id: hp_psu_${psu_num}
     name: hp_psu_${psu_num}
-    disabled_by_default: ${disable_by_default}
+    enabled: "${enable}"
     address: ${psu_addr}
     update_interval: 1s  # Setting to 1s as the update happens in a few rounds
     intake_temperature:

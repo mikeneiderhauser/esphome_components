@@ -67,7 +67,7 @@ class HPPSUI2CComponent : public esphome::EntityBase, public esphome::PollingCom
     void set_watt_out(sensor::Sensor *s)       { watt_out_ = s; }
 
     // Marks this PSU slot as unused — fully skips setup/polling when true.
-    // Wired from the YAML `disabled_by_default` value in to_code().
+    // Wired from the inverse of the YAML `enabled` option in to_code().
     void set_psu_disabled(bool disabled) { psu_disabled_ = disabled; }
 
     // Fan / temp control setters

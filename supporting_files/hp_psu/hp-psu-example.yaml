@@ -8,9 +8,9 @@ substitutions:
   subnet: 255.255.255.0
   gateway: 10.0.0.1
 
-  disable_by_default_psu1: "false" # set to false to enable, true to disable
-  disable_by_default_psu2: "false"  # set to true to disable
-  disable_by_default_psu3: "true"  # set to true to disable
-  disable_by_default_psu4: "true"  # set to true to disable
+  enable_psu1: "true"   # set to true to enable, false to disable
+  enable_psu2: "true"   # set to true to enable, false to disable
+  enable_psu3: "false"  # set to true to enable, false to disable
+  enable_psu4: "false"  # set to true to enable, false to disable
 
 <<: !include ./common/HPPSU_CTRL_r2.0.yaml
